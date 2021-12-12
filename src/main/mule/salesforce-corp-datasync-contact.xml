@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:secure-properties="http://www.mulesoft.org/schema/mule/secure-properties" xmlns:kafka="http://www.mulesoft.org/schema/mule/kafka"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns:salesforce="http://www.mulesoft.org/schema/mule/salesforce" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/salesforce http://www.mulesoft.org/schema/mule/salesforce/current/mule-salesforce.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+http://www.mulesoft.org/schema/mule/kafka http://www.mulesoft.org/schema/mule/kafka/current/mule-kafka.xsd
+http://www.mulesoft.org/schema/mule/secure-properties http://www.mulesoft.org/schema/mule/secure-properties/current/mule-secure-properties.xsd">
+	<salesforce:sfdc-config name="Salesforce_Config" doc:name="Salesforce Config" doc:id="890fdaf6-95ef-4b43-8ac7-6c2e2221279f" >
+		<salesforce:basic-connection username="${secure::sf.userName}" password="${secure::sf.password}" securityToken="${sf.token}"/>
+	</salesforce:sfdc-config>
+	<http:listener-config name="HTTP_Listener_config" doc:name="HTTP Listener config" doc:id="3b26990d-893b-4ab4-b78d-b01cbcf4cb68" >
+		<http:listener-connection host="0.0.0.0" port="8081" />
+	</http:listener-config>
+	<kafka:producer-config name="Apache_Kafka_Producer_configuration" doc:name="Apache Kafka Producer configuration" doc:id="f8bbb03c-6a4f-4165-8534-af438b327afd" >
+		<kafka:producer-plaintext-connection >
+			<kafka:bootstrap-servers >
+				<kafka:bootstrap-server value="localhost:29092" />
+			</kafka:bootstrap-servers>
+		</kafka:producer-plaintext-connection>
+	</kafka:producer-config>
+	<kafka:consumer-config name="Apache_Kafka_Consumer_configuration" doc:name="Apache Kafka Consumer configuration" doc:id="8e6b14cc-f589-431c-848d-3960d55cf6b1" >
+		<kafka:consumer-plaintext-connection >
+			<kafka:bootstrap-servers >
+				<kafka:bootstrap-server value="localhost:29092" />
+			</kafka:bootstrap-servers>
+			<kafka:topic-patterns >
+				<kafka:topic-pattern value="topicOne" />
+			</kafka:topic-patterns>
+		</kafka:consumer-plaintext-connection>
+	</kafka:consumer-config>
+	<configuration-properties doc:name="Configuration properties" doc:id="1e732916-1a01-4d89-82e7-7366a61952f0" file="dev.yaml" />
+	<secure-properties:config name="Secure_Properties_Config" doc:name="Secure Properties Config" doc:id="c2bca295-3bc1-4092-9f49-2de1756bab5a" file="${env}.yaml" key="${key.inc}" >
+		<secure-properties:encrypt algorithm="Blowfish" />
+	</secure-properties:config>
+	<flow name="query-salesforce-object-flow" doc:id="17d7734c-e772-4894-aae2-1fa52840bd3b" >
+		<http:listener doc:name="Listener" doc:id="27b7408e-1769-4306-9627-e408766af8d9" config-ref="HTTP_Listener_config" path="/contacts"/>
+		<salesforce:query doc:name="Query" doc:id="3cb46492-e56e-4bd7-b521-802c5ddaea0e" config-ref="Salesforce_Config">
+			<salesforce:salesforce-query ><![CDATA[select FIELDS(ALL) from Contact limit 200]]></salesforce:salesforce-query>
+		</salesforce:query>
+		<ee:transform doc:name="Transform Message" doc:id="41a46402-307c-44a0-8e27-f42750a03473" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+payload]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+	</flow>
+	<flow name="create-topic-flow" doc:id="6d0c026c-0de7-4d43-af09-6229be67d285" >
+		<http:listener doc:name="Listener" doc:id="c5f685a0-1d75-4926-9814-1cbc02b33660" config-ref="HTTP_Listener_config" path="/createTopic"/>
+		<salesforce:publish-topic doc:name="Publish topic" doc:id="92278998-e9bc-4105-a538-78487eed69c7" config-ref="Salesforce_Config" topicName="topicOne" query="SELECT Id,Name,AccountId,AssistantName,AssistantPhone,Birthdate,MailingAddress FROM Contact"/>
+		<ee:transform doc:name="Transform Message" doc:id="47505ef6-2011-4069-978d-94200f1022e7" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+payload]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+	</flow>
+	<flow name="salesforce-corp-datasyncFlow" doc:id="193c0bfe-d900-42b8-903b-62115b562c35">
+		<salesforce:subscribe-topic-listener doc:name="Subscribe topic listener" doc:id="875e03ee-1b08-4fcb-9913-9a2b9b4ff04e" config-ref="Salesforce_Config" topic="topicOne" />
+		<ee:transform doc:name="Transform Message" doc:id="4233e258-f10d-449a-8d89-d93dd1f26200">
+			<ee:message>
+				<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+payload]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<choice doc:name="Choice" doc:id="a7f227da-a0a0-42f7-893e-20e7553b409b">
+			<when expression="attributes.'type'=='updated'">
+				<logger level="INFO" doc:name="Update" doc:id="ae090f32-0a70-4e21-9113-8b6691764420" message="update " />
+			</when>
+			<when expression="attributes.'type'=='created'">
+				<logger level="INFO" doc:name="Create" doc:id="0b7be6d5-2889-4267-943b-b55da0bc91a3" />
+			</when>
+			<when expression="attributes.'type'=='deleted'">
+				<logger level="INFO" doc:name="Delete" doc:id="24748271-1eb9-483d-9239-4b3b5f846e69" />
+			</when>
+		</choice>
+		<logger level="INFO" doc:name="Logger" doc:id="f2bcc40c-0458-4fbb-a67c-e1deb6e4f32f" message="#[payload]" />
+	</flow>
+	<flow name="salesforce-corp-datasync-contactFlow" doc:id="2dbb00ca-cd79-408c-93f2-b4796bfa072e" >
+		<http:listener doc:name="Listener" doc:id="6369de6e-2283-46e7-b31c-8b428abeaf2f" config-ref="HTTP_Listener_config" path="/publish"/>
+		<kafka:publish doc:name="Publish" doc:id="5f8022c1-e175-47b7-858b-077904dccf25" config-ref="Apache_Kafka_Producer_configuration" topic="topicOne" partition="1"/>
+	</flow>
+	<flow name="salesforce-corp-datasync-contactFlow1" doc:id="af8cb567-8611-4086-8c25-a1815b4f21b4" >
+		<kafka:message-listener doc:name="Message listener" doc:id="4f93755d-e3a4-46ab-9035-2f362232c77f" config-ref="Apache_Kafka_Consumer_configuration" ackMode="AUTO" parallelConsumersAmount="2"/>
+		<scatter-gather doc:name="Scatter-Gather" doc:id="476b8bdb-1542-445b-a4e3-b2aad3081acd" >
+			<route >
+				<logger level="INFO" doc:name="Update contact for SF1" doc:id="bec13536-45c6-4560-bcd5-feb93a2f00b2" message="Update contact for SF1"/>
+			</route>
+			<route >
+				<logger level="INFO" doc:name="Update contact for SF2" doc:id="858cc7fc-8578-419d-beb9-84bf26a8d608" message="Update contact for SF2"/>
+			</route>
+			<route >
+				<logger level="INFO" doc:name="Update contact for SF3" doc:id="dd2ab4c3-6122-48d2-bf10-5a7c9e2eb3b5" message="Update contact for SF3"/>
+			</route>
+		</scatter-gather>
+	</flow>
+</mule>
